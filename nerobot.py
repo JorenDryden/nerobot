@@ -2,10 +2,23 @@ import discord
 from discord.ext import commands
 import yt_dlp
 import asyncio
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+api_token = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
+
+client = commands.Bot(command_prefix="!", intents=intents)
+
+async def main():
+    await client.add_cog(MusicBot(client))
+    await client.start(api_token)
+asyncio.run(main())
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 
@@ -71,9 +84,4 @@ class MusicBot(commands.Cog):
     async def commands(self, ctx):
         await ctx.send(f'## NeroBot Commands\n!play <title> - play a track from youtube\n!skip - skip the current track\n!queue - view the current track queue\n!commands -  display all relevant commands')
 
-client = commands.Bot(command_prefix="!", intents=intents)
 
-async def main():
-    await client.add_cog(MusicBot(client))
-    await client.start('PLACE THE DISCORD TOKEN HERE') # make sure the token is correctly placed between the quotes ('  -->     place here    <--    ')
-asyncio.run(main())
