@@ -32,7 +32,7 @@ class MusicBot(commands.Cog):
     async def play(self, ctx, *, search):
         voice_channel = ctx.author.voice.channel if ctx.author.voice else None
         if not voice_channel:
-            return await ctx.send("## ❌ You're not in a voice channel")
+            return await ctx.send("##You're not in a voice channel❌")
 
         if not ctx.voice_client:
             await voice_channel.connect()
@@ -45,7 +45,7 @@ class MusicBot(commands.Cog):
                 url = info['url']
                 title = info['title']
                 self.queue.append((url, title))
-                await ctx.send(f'## ✅ Added to queue: **{title}**')
+                await ctx.send(f'##Added to queue✅: **{title}**')
 
         if not ctx.voice_client.is_playing():
             await self.play_next(ctx)
@@ -55,13 +55,13 @@ class MusicBot(commands.Cog):
             url, title = self.queue.pop(0)
             source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
             ctx.voice_client.play(source, after=lambda _: self.client.loop.create_task(self.play_next(ctx)))
-            await ctx.send(f'## 🎵 Now Playing: **{title}**')
+            await ctx.send(f'##Now Playing 🎵: **{title}**')
 
     @commands.command()
     async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-            await ctx.send("## ⏩ Currently playing song has been skipped.")
+            await ctx.send("##Current track has been skipped ⏩.")
 
     @commands.command()
     async def queue(self, ctx):
@@ -69,11 +69,11 @@ class MusicBot(commands.Cog):
             await ctx.send("## 🪹 NeroBot's queue is currently empty.")
         else:
             queue_list = "\n".join([f"{index + 1}. {title}" for index, (_, title) in enumerate(self.queue)])
-            await ctx.send(f"## ↪️ Current Queue:\n{queue_list}")
+            await ctx.send(f"##Current Queue ↪️:\n{queue_list}")
 
     @commands.command()
     async def commands(self, ctx):
-        await ctx.send('## 📋 NeroBot Commands\n**!play <title>** - play a track from youtube\n**!skip** - skip the current track\n**!queue** - view the current track queue\n**!commands** -  display all relevant commands')
+        await ctx.send('##NeroBot Commands📋:\n**!play <title>** - play a track from youtube\n**!skip** - skip the current track\n**!queue** - view the current track queue\n**!commands** -  display all relevant commands')
 
 intents = discord.Intents.default()
 intents.message_content = True
