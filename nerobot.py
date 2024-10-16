@@ -24,18 +24,10 @@ YDL_OPTIONS = {
 }
 
 class MusicBot(commands.Cog):
-
-
     def __init__(self, client):
         self.client = client
         self.queue = []
-        self.current_song = None
-
-    def getCurrentTrack(self):
-        return self.__currentTrack
-
-    def setCurrentTrack(self, track):
-        self.__currentTrack = track
+        self.last_now_playing_msg_id = None
 
     @commands.command()
     async def play(self, ctx, *, search):
@@ -56,9 +48,8 @@ class MusicBot(commands.Cog):
                 self.queue.append((url, title))
                 if ctx.voice_client.is_playing():
                     await ctx.send(f'## **Added to Queue **✅ \n> **{title}**')
-
-        if not ctx.voice_client.is_playing():
-            await self.play_next(ctx)
+                else:
+                    await self.play_next(ctx)
 
     async def play_next(self, ctx):
         if self.queue:
@@ -66,41 +57,69 @@ class MusicBot(commands.Cog):
             self.current_song = title  # Update current track here
             source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
             ctx.voice_client.play(source, after=lambda _: self.client.loop.create_task(self.play_next(ctx)))
-            await ctx.send(f'## **Now Playing **🎵 \n > **{title}**')
+
+            # Edit or send the "now playing" message
+            if self.last_now_playing_msg_id:
+                try:
+                    # Try to fetch the last message by its ID
+                    last_msg = await ctx.channel.fetch_message(self.last_now_playing_msg_id)
+                    # Check if the last message is a "now playing" message
+                    if last_msg.content.startswith("## **Now Playing **"):
+                        # Edit the previous message
+                        await last_msg.edit(content=f'## **Now Playing **🎵 \n > **{title}**')
+                        return
+                except discord.NotFound:
+                    # If the message is not found, send a new one
+                    pass
+
+            # Send a new "now playing" message
+            new_msg = await ctx.send(f'## **Now Playing **🎵 \n > **{title}**')
+            self.last_now_playing_msg_id = new_msg.id  # Store the ID of the new message
 
     @commands.command()
     async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             await ctx.send("## **Current track has been skipped **⏩")
             ctx.voice_client.stop()
+            print("The current track is has been skipped.")
 
     @commands.command()
     async def queue(self, ctx):
         if not self.queue:
-            await ctx.send("**NeroBot's queue is currently empty **🪹")
+            await ctx.send("## **NeroBot's queue is currently empty **🪹")
+            print("The was requested to be displayed but was empty.")
+
         else:
             # Format currently playing track and queue list separately
             queueString = f"## **Currently Playing** 🎵\n> **{self.current_song}**\n\n## **Up Next** ↩️\n"
             queueString += "\n".join([f"{index + 1}. {title}" for index, (_, title) in enumerate(self.queue)])
             await ctx.send(queueString)
+            print("The queue has been displayed.")
 
     @commands.command()
     async def leave(self, ctx):
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
-            await ctx.send("**NeroBot has disconnected from the voice channel **😘")
+            print("Bot has been disconnected")
+            await ctx.send("## **NeroBot has disconnected from the voice channel **😘")
 
     @commands.command()
     async def clear(self, ctx):
         self.queue.clear()
+        print("The track queue has been cleared")
         await ctx.send("## **The track queue has been cleared **🗑️")
 
     @commands.command()
+    async def goodbot(self, ctx):
+        print("Bot has been thanked")
+        await ctx.send("## **Thanks ** 🥰")
+
+    @commands.command()
     async def commands(self, ctx):
-        commandlist = """ 
-        ## __**NeroBot Commands**__📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!commands** -  display all relevant commands'
+        commandList = """ 
+        ## __**NeroBot Commands**__📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!commands** -  display all relevant commands\n- **!goodbot** - thank the bot for its service'
         """
-        await ctx.send(commandlist)
+        await ctx.send(commandList)
 
 intents = discord.Intents.default()
 intents.message_content = True
