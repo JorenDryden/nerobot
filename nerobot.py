@@ -28,6 +28,7 @@ class MusicBot(commands.Cog):
         self.client = client
         self.queue = []
         self.last_now_playing_msg_id = None
+        self.current_song = None
 
     @commands.command()
     async def play(self, ctx, *, search):
@@ -58,6 +59,8 @@ class MusicBot(commands.Cog):
             source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
             ctx.voice_client.play(source, after=lambda _: self.client.loop.create_task(self.play_next(ctx)))
 
+            print(f"Playing: {self.current_song}")  # Debugging print
+
             # Edit or send the "now playing" message
             if self.last_now_playing_msg_id:
                 try:
@@ -67,28 +70,34 @@ class MusicBot(commands.Cog):
                     if last_msg.content.startswith("## **Now Playing **"):
                         # Edit the previous message
                         await last_msg.edit(content=f'## **Now Playing **🎵 \n > **{title}**')
+                        print("Edited last 'now playing' message.")  # Debugging print
                         return
                 except discord.NotFound:
                     # If the message is not found, send a new one
+                    print("Last 'now playing' message not found; sending a new message.")  # Debugging print
                     pass
 
             # Send a new "now playing" message
             new_msg = await ctx.send(f'## **Now Playing **🎵 \n > **{title}**')
             self.last_now_playing_msg_id = new_msg.id  # Store the ID of the new message
+            print("Sent new 'now playing' message.")  # Debugging print
 
     @commands.command()
     async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             await ctx.send("## **Current track has been skipped **⏩")
             ctx.voice_client.stop()
-            print("The current track is has been skipped.")
+            print("The current track has been skipped.")
 
     @commands.command()
     async def queue(self, ctx):
-        if not self.queue:
+        if not ctx.voice_client.is_playing():
             await ctx.send("## **NeroBot's queue is currently empty **🪹")
-            print("The was requested to be displayed but was empty.")
-
+            print("The queue was requested to be displayed but was empty.")
+        elif ctx.voice_client.is_playing() and not self.queue:
+            queueString = f"## **Currently Playing** 🎵\n> **{self.current_song}**\n\n## **Up Next** ↩️\n..."
+            await ctx.send(queueString)
+            print("The queue has been displayed.")
         else:
             # Format currently playing track and queue list separately
             queueString = f"## **Currently Playing** 🎵\n> **{self.current_song}**\n\n## **Up Next** ↩️\n"
