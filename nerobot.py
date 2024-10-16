@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+import random
 import yt_dlp
 import asyncio
 import os
@@ -22,6 +23,41 @@ YDL_OPTIONS = {
     'format': 'bestaudio', 
     'noplaylist': True
 }
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.voice_states = True
+client = commands.Bot(command_prefix="!", intents=intents)
+
+@client.event
+async def on_ready():
+    music_activities = [
+        "lofi beats",
+        "jazz classics",
+        "chill vibes",
+        "indie tracks",
+        "relaxing tunes",
+        "soulful sounds",
+        "instrumental tracks",
+        "classical symphonies",
+        "acoustic jams",
+        "electronic beats",
+        "the latest releases",
+        "90's hits",
+        "reggae vibes",
+        "some vinyls",
+        "smooth jazz",
+        "dance hits",
+        "garage tunes",
+        "happy tunes",
+        "ambient sounds",
+        "funk grooves",
+        "some mixtapes"
+    ]
+    activity = random.choice(music_activities)
+    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=activity))
+    print(f'Logged in as {client.user} (ID: {client.user.id})')
+    print('----------------------------------------------------')
 
 class MusicBot(commands.Cog):
     def __init__(self, client):
@@ -61,23 +97,19 @@ class MusicBot(commands.Cog):
 
             print(f"Playing: {self.current_song}")  # Debugging print
 
-            # Edit or send the "now playing" message
+            # Delete the last "Now Playing" message if it exists
             if self.last_now_playing_msg_id:
                 try:
-                    # Try to fetch the last message by its ID
+                    # Try to fetch and delete the last "Now Playing" message
                     last_msg = await ctx.channel.fetch_message(self.last_now_playing_msg_id)
-                    # Check if the last message is a "now playing" message
-                    if last_msg.content.startswith("## **Now Playing **"):
-                        # Edit the previous message
-                        await last_msg.edit(content=f'## **Now Playing **🎵 \n > **{title}**')
-                        print("Edited last 'now playing' message.")  # Debugging print
-                        return
+                    await last_msg.delete()
+                    print("Deleted last 'now playing' message.")  # Debugging print
                 except discord.NotFound:
-                    # If the message is not found, send a new one
-                    print("Last 'now playing' message not found; sending a new message.")  # Debugging print
+                    # If the message is not found, just pass
+                    print("Last 'now playing' message not found; no deletion needed.")  # Debugging print
                     pass
 
-            # Send a new "now playing" message
+            # Send a new "Now Playing" message
             new_msg = await ctx.send(f'## **Now Playing **🎵 \n > **{title}**')
             self.last_now_playing_msg_id = new_msg.id  # Store the ID of the new message
             print("Sent new 'now playing' message.")  # Debugging print
@@ -109,32 +141,32 @@ class MusicBot(commands.Cog):
     async def leave(self, ctx):
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
+            await ctx.send("## **NeroBot has disconnected from the voice channel **👋")
             print("Bot has been disconnected")
-            await ctx.send("## **NeroBot has disconnected from the voice channel **😘")
 
     @commands.command()
     async def clear(self, ctx):
         self.queue.clear()
-        print("The track queue has been cleared")
         await ctx.send("## **The track queue has been cleared **🗑️")
+        print("The track queue has been cleared")
 
     @commands.command()
     async def goodbot(self, ctx):
+        author = ctx.author.voice.channel
+        await ctx.send(f'## **Thanks {author} ** 🥰')
         print("Bot has been thanked")
-        await ctx.send("## **Thanks ** 🥰")
+
+    @commands.command()
+    async def about(self, ctx):
+        await ctx.send("# About NeroBot :robot:\n- NeroBot is a youtube-based discord music bot written in Python and is about ~200 lines of code. \n - It uses the following libraries: yt_dlp, discord.py, dotenv, and some other internal libraries.\n- NeroBot runs on a Raspberry Pi 3.0 B+ single core machine (WIP).\n- You can access the git repository and view the development timeline [here](https://github.com/JorenDryden/nerobot).")
+        print("Printed about message")
 
     @commands.command()
     async def commands(self, ctx):
         commandList = """ 
-        ## __**NeroBot Commands**__📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!commands** -  display all relevant commands\n- **!goodbot** - thank the bot for its service'
-        """
+        ## __**NeroBot Commands**__📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!commands** -  display all relevant commands\n- **!goodbot** - thank the bot for its service\n- **!about** - about NeroBot"""
         await ctx.send(commandList)
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.voice_states = True
-
-client = commands.Bot(command_prefix="!", intents=intents)
+        print("Printed commands list.")
 
 async def main():
     await client.add_cog(MusicBot(client))
