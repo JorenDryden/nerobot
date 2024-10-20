@@ -31,14 +31,12 @@ intents.message_content = True
 intents.voice_states = True
 client = commands.Bot(command_prefix="!", intents=intents)
 
-
-
 @client.event
 async def on_ready():
     print(f'Logged in as {client.user} (ID: {client.user.id})')
     print('---------------------------------------------------')
-    # Start the periodic update loop when bot is ready
-    client.loop.create_task(periodic_update())
+    asyncio.create_task(auto_disconnect())  # Create task for auto disconnect
+    asyncio.create_task(update_presence())  # Create task for updating presence
 
 async def update_presence():
     music_activities = [
@@ -47,30 +45,49 @@ async def update_presence():
         "classical symphonies", "acoustic jams", "electronic beats",
         "the latest releases", "90's hits", "reggae vibes",
         "some vinyls", "smooth jazz", "dance hits", "garage tunes",
-        "happy tunes", "ambient sounds", "funk grooves", "some mixtapes"
+        "happy tunes", "ambient sounds", "funk grooves", "some mix-tapes"
     ]
-    activity = random.choice(music_activities)
-    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=activity))
-    print(f'[System] - [{time.ctime()}] - Updated presence to: listening to {activity}')
-
-async def periodic_update():
     while True:
-        await update_presence()  # Call the presence update function
-        await asyncio.sleep(20 * 60)  # Wait for 20 minute
+        activity = random.choice(music_activities)
+        await client.change_presence(
+            activity=discord.Activity(type=discord.ActivityType.listening, name=activity)
+        )
+        print(f'[System] - [{time.ctime()}] - Updated presence to: listening to {activity}')
+        await asyncio.sleep(60 * 30)  # Update presence every 30 minutes
+
+async def auto_disconnect():
+    await client.wait_until_ready()  # Wait for bot to be ready
+    while True:
+        for vc in client.voice_clients:  # Check all connected voice clients
+            if not vc.is_playing():  # If nothing is playing
+                print(f'[System] - [{time.ctime()}] - Starting auto disconnect sequence')
+                await asyncio.sleep(300)  # Wait 5 minutes
+                if not vc.is_playing():  # If still not playing, disconnect
+                    print(f'[System] - [{time.ctime()}] - Bot has been auto disconnected')
+                    await vc.disconnect()
+                else:
+                    print(f'[System] - [{time.ctime()}] - Cancelled auto disconnect sequence')
+        await asyncio.sleep(60)  # Check every 60 seconds
 
 class MusicBot(commands.Cog):
     def __init__(self, client):
         self.client = client
-        self.queue = [] # The queue of all user requested tracks
+        self.track_queue = [] # The queue of all user-requested tracks
         self.last_now_playing_msg_id = None # Unique ID of previous bot message (used by play_next to remove the previous message if it is identical to the newest)
-        self.current_song = None # The current song playing (set by play_next() and used to update the now playing message)
+        self.active_track = None # The current song playing (set by play_next() and used to update the now playing message)
+
+    @commands.command()
+    async def join(self, ctx):
+        author_display_name = ctx.author.display_name
+        print(f'[User] - [{time.ctime()}] - {author_display_name} manually summoned NeroBot')
+        await ctx.author.voice.channel.connect()
 
     @commands.command()
     async def play(self, ctx, *, search):
         author_display_name = ctx.author.display_name
         voice_channel = ctx.author.voice.channel if ctx.author.voice else None
         if not voice_channel:
-            print(f'[System] - [{time.ctime()}] - {author_display_name} tried to summon bot but was not in a voice channel')
+            print(f'[System] - [{time.ctime()}] - {author_display_name} tried to summon NeroBot but was not in a voice channel')
             return await ctx.send("## **You're not in a voice channel **❌")
 
         if not ctx.voice_client:
@@ -84,7 +101,7 @@ class MusicBot(commands.Cog):
                     info = info['entries'][0]
                 url = info['url']
                 title = info['title']
-                self.queue.append((url, title))
+                self.track_queue.append((url, title))
                 print(f'[User] - [{time.ctime()}] - {author_display_name} added {title} to queue')
                 if ctx.voice_client.is_playing():
                     await ctx.send(f'## **Added to Queue **✅ \n> **{title}**')
@@ -92,12 +109,12 @@ class MusicBot(commands.Cog):
                     await self.play_next(ctx)
 
     async def play_next(self, ctx):
-        if self.queue:
-            url, title = self.queue.pop(0)
-            self.current_song = title  # Update current track here
+        if self.track_queue:
+            url, title = self.track_queue.pop(0)
+            self.active_track = title  # Update current track here
             source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
             ctx.voice_client.play(source, after=lambda _: self.client.loop.create_task(self.play_next(ctx)))
-            print(f"[System] - [{time.ctime()}] - Now playing: {self.current_song}")  # Debugging print
+            print(f"[System] - [{time.ctime()}] - Now playing: {self.active_track}")  # Debugging print
             # Delete the last "Now Playing" message if it exists
             if self.last_now_playing_msg_id:
                 try:
@@ -116,9 +133,8 @@ class MusicBot(commands.Cog):
         author_display_name = ctx.author.display_name
         if ctx.voice_client and ctx.voice_client.is_playing():
             await ctx.send("## **Current track has been skipped **⏩")
-            print(f'[User] - [{time.ctime()}] - {author_display_name} skipped {self.current_song}')
+            print(f'[User] - [{time.ctime()}] - {author_display_name} skipped {self.active_track}')
             ctx.voice_client.stop()
-
 
     @commands.command()
     async def queue(self, ctx):
@@ -126,14 +142,14 @@ class MusicBot(commands.Cog):
         if not ctx.voice_client.is_playing():
             await ctx.send("## **NeroBot's queue is currently empty **🪹")
             print(f'[User] - [{time.ctime()}] - {author_display_name} requested the queue but it was empty')
-        elif ctx.voice_client.is_playing() and not self.queue:
-            queueString = f"## **Currently Playing** 🎵\n> **{self.current_song}**\n\n## **Up Next** ↩️\n..."
+        elif ctx.voice_client.is_playing() and not self.track_queue:
+            queueString = f"## **Currently Playing** 🎵\n> **{self.active_track}**\n\n## **Up Next** ↩️\n..."
             await ctx.send(queueString)
             print(f'[User] - [{time.ctime()}] - {author_display_name} requested the queue')
         else:
             # Format currently playing track and queue list separately
-            queueString = f"## **Currently Playing** 🎵\n> **{self.current_song}**\n\n## **Up Next** ↩️\n"
-            queueString += "\n".join([f"{index + 1}. {title}" for index, (_, title) in enumerate(self.queue)])
+            queueString = f"## **Currently Playing** 🎵\n> **{self.active_track}**\n\n## **Up Next** ↩️\n"
+            queueString += "\n".join([f"{index + 1}. {title}" for index, (_, title) in enumerate(self.track_queue)])
             await ctx.send(queueString)
             print(f'[User] - [{time.ctime()}] - {author_display_name} requested the queue')
 
@@ -142,13 +158,13 @@ class MusicBot(commands.Cog):
         author_display_name = ctx.author.display_name
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
+            print(f'[User] - [{time.ctime()}] - {author_display_name} disconnected NeroBot from "{ctx.voice_client.channel.name}"')
             await ctx.send("## **NeroBot has disconnected from the voice channel **👋")
-            print(f'[User] - [{time.ctime()}] - {author_display_name} disconnected NeroBot from {ctx.voice_client.channel.name}')
 
     @commands.command()
     async def clear(self, ctx):
         author_display_name = ctx.author.display_name
-        self.queue.clear()
+        self.track_queue.clear()
         await ctx.send("## **The track queue has been cleared **🗑️")
         print(f'[User] - [{time.ctime()}] - {author_display_name} displayed the current track queue')
 
