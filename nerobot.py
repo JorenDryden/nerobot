@@ -1,47 +1,44 @@
-import time
-import discord
-from discord.ext import commands
-import random
-import yt_dlp
 import asyncio
 import os
+import random
+import time
+
+import discord
+import yt_dlp
+
+from colorama import Fore, init
+from discord.ext import commands
 from dotenv import load_dotenv
-from colorama import Fore, Back, Style, init
-init(autoreset=True)
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Retrieve the Discord token from environment variable
-api_token = os.getenv("DISCORD_TOKEN")
-if api_token is None:
-    raise ValueError("DISCORD_TOKEN is not set or could not be loaded.")
-
-FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
-}
-
-YDL_OPTIONS = {
-    'format': 'bestaudio',
-    'noplaylist': True,
-    'quiet': True
-}
-
-YDL_PLAYLIST_OPTIONS = {
-    'format': 'bestaudio/best',
-    'noplaylist': False,
-    'quiet': True
-}
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
+load_dotenv()
+api_token = os.getenv("DISCORD_TOKEN")
+
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
+}
+YDL_OPTIONS = {
+    'format': 'bestaudio',
+    'noplaylist': True,
+    'quiet': True
+}
+YDL_PLAYLIST_OPTIONS = {
+    'format': 'bestaudio/best',
+    'noplaylist': False,
+    'quiet': True,
+    'ignoreerrors': True,  # Skip unavailable videos
+}
+
+init(autoreset=True)
 systemColor = Fore.LIGHTBLUE_EX
 userInputColor = Fore.LIGHTGREEN_EX
 statusColor = Fore.CYAN
 userColor = Fore.LIGHTMAGENTA_EX
+addedToQueue = Fore.LIGHTYELLOW_EX
 
 client = commands.Bot(command_prefix="!", intents=intents)
 
@@ -83,22 +80,6 @@ async def auto_disconnect():
                     print(f'{systemColor}[System] - [{time.ctime()}] - Cancelled auto disconnect sequence')
         await asyncio.sleep(60)
 
-async def connect(ctx):
-    voice_channel = ctx.author.voice.channel if ctx.author.voice else None
-
-    if not voice_channel:
-        print(f'{Fore.LIGHTBLUE_EX}[System] - [{time.ctime()}] - {ctx.author.display_name} tried to summon NeroBot via play command but was not in a voice channel')
-        return await ctx.send("## **You're not in a voice channel **❌")
-
-    if not ctx.voice_client:  # Bot is not in a voice channel
-        await voice_channel.connect()
-        print(f'{systemColor}[System] - [{time.ctime()}] - NeroBot joined "{voice_channel.name}" voice channel via play command')
-    elif ctx.voice_client.channel != voice_channel:  # Bot is in a different voice channel
-        await ctx.voice_client.move_to(voice_channel)
-        print(f'{systemColor}[System] - [{time.ctime()}] - NeroBot moved to "{voice_channel.name}" voice channel')
-    else:
-        print(f'{systemColor}[System] - [{time.ctime()}] - NeroBot is already in "{voice_channel.name}"')
-
 class MusicBot(commands.Cog):
     def __init__(self, client):
         self.client = client
@@ -136,8 +117,29 @@ class MusicBot(commands.Cog):
         self.last_now_playing_msg_id = new_msg.id
 
     @commands.command()
+    async def connect(self, ctx):
+        voice_channel = ctx.author.voice.channel if ctx.author.voice else None
+        try:
+            if not voice_channel:  # User summoned the bot but wasn't in a channel
+                print(
+                    f'{Fore.LIGHTBLUE_EX}[System] - [{time.ctime()}] - {ctx.author.display_name} tried to summon NeroBot via play command but was not in a voice channel')
+                return await ctx.send("## **You're not in a voice channel **❌")
+
+            if not ctx.voice_client:  # Bot is not in a voice channel
+                print(
+                    f'{systemColor}[System] - [{time.ctime()}] - NeroBot joined "{voice_channel.name}" voice channel via play command')
+                return await voice_channel.connect()
+
+            elif ctx.voice_client.channel != voice_channel:  # Bot is in a different voice channel
+                print(
+                    f'{systemColor}[System] - [{time.ctime()}] - NeroBot moved to "{voice_channel.name}" voice channel')
+                return await ctx.voice_client.move_to(voice_channel)
+        except Exception as e:
+            print(f'{systemColor}[System] - [{time.ctime()}] - {e}')
+
+    @commands.command()
     async def play(self, ctx, *, search):
-        await connect(ctx)  # Ensure the bot connects to the user's voice channel
+        await self.connect(ctx)  # Ensure the bot connects to the user's voice channel
 
         async with ctx.typing():
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -147,7 +149,7 @@ class MusicBot(commands.Cog):
                 url = info['url']
                 title = info['title']
                 self.track_queue.append((url, title))
-                print(f"{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} added {title} to queue")
+                print(f"{userInputColor}[User] - [{time.ctime()}] - {addedToQueue}{ctx.author.display_name} added {title} to queue")
 
         if ctx.voice_client.is_playing():
             await ctx.send(f'## **Added to Queue **✅ \n> **{title}**')
@@ -156,20 +158,42 @@ class MusicBot(commands.Cog):
 
     @commands.command()
     async def playlist(self, ctx, *, search):
+        playlist_shuffler = []
 
-        await connect(ctx) # Ensure the bot connects to the user's voice channel
+        await self.connect(ctx)  # Ensure the bot connects to the user's voice channel
 
         async with ctx.typing():
-            with yt_dlp.YoutubeDL(YDL_PLAYLIST_OPTIONS) as ydl:
-                playlist_info = ydl.extract_info(search, download=False)
-                print(f"{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} added entries in '{playlist_info['title']}' to queue.")
-                await ctx.send(f"## **Added Playlist Entries to Queue **✅ \n> **{playlist_info['title']} **")
-                # Add all the songs in the playlist to the queue
-                for entry in playlist_info['entries']:
-                    url = entry['url']
-                    title = entry['title']
-                    self.track_queue.append((url, title))
-                    print(f"{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} added {title} to queue")
+            try:
+                with yt_dlp.YoutubeDL(YDL_PLAYLIST_OPTIONS) as ydl:
+                    playlist_info = ydl.extract_info(search, download=False)
+                    print(f"{userInputColor}[User] - [{time.ctime()}] - {addedToQueue}{ctx.author.display_name} added entries in '{playlist_info['title']}' to queue.")
+
+                    # Add all the songs in the extracted playlist to a temp shuffler playlist
+                    for entry in playlist_info.get('entries', []):
+                        if not entry:  # Skip invalid or unavailable videos
+                            continue
+                        try:
+                            url = entry['url']
+                            title = entry['title']
+                            if url and title:
+                                playlist_shuffler.append((url, title))
+                        except Exception as e:
+                            print(f"{systemColor}[System] - [{time.ctime()}] - Error adding song: {e}")
+                            continue
+
+                    # Pop a random item from the temp playlist to the queue
+                    while playlist_shuffler:
+                        url, title = playlist_shuffler.pop(random.randrange(len(playlist_shuffler)))
+                        self.track_queue.append((url, title))
+                        print(f"{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} added {title} to queue")
+
+                    await ctx.send(f"## **Added Playlist Entries to Queue **✅ \n> **{playlist_info['title']} **")
+            except Exception as e:
+                print(f"{systemColor}[System] - [{time.ctime()}] - Error extracting playlist: {e}")
+                await ctx.send(f"Error extracting playlist, ensure playlist is public and contains valid entries.")
+
+        if not ctx.voice_client.is_playing():
+            await self.player_loop(ctx)
 
     @commands.command()
     async def skip(self, ctx):
@@ -181,7 +205,6 @@ class MusicBot(commands.Cog):
     @commands.command()
     async def queue(self, ctx):
         # If the queue is empty and there is no active track
-
         if not self.active_track and not self.track_queue:
             await ctx.send("## **NeroBot's queue is currently empty **🪹")
             print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue but it was empty')
@@ -212,7 +235,7 @@ class MusicBot(commands.Cog):
 
     @commands.command()
     async def about(self, ctx):
-        await ctx.send("# About NeroBot :robot:\n- NeroBot is a youtube-based discord music bot written in Python and is about ~200 lines of code. \n - It uses the following libraries: yt_dlp, discord.py, dotenv, and some other internal libraries.\n- NeroBot runs on a Raspberry Pi 3.0 B+ single core machine (WIP).\n- You can access the git repository and view the development timeline [here](https://github.com/JorenDryden/nerobot).")
+        await ctx.send("# About NeroBot :robot:\n- NeroBot is a youtube-based discord music bot written in Python. \n - It uses the following libraries: yt_dlp, discord.py, dotenv, and other internal libraries.\n- NeroBot runs on a Raspberry Pi 3.0 B+ single core machine (WIP).\n- You can access the git repository and view the development timeline [here](https://github.com/JorenDryden/nerobot).")
         print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} displayed about me')
 
     @commands.command()
@@ -223,9 +246,8 @@ class MusicBot(commands.Cog):
 
     @commands.command()
     async def instructions(self, ctx):
-        commandList = """ 
-        ## __**NeroBot Commands**__ 📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!instructions** -  display all relevant commands\n- **!goodbot** - thank the bot for its service\n- **!about** - about NeroBot"""
-        await ctx.send(commandList)
+        command_list = """## __**NeroBot Commands**__ 📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!instructions** -  display all relevant commands\n- **!goodbot** - thank the bot for its service\n- **!about** - about NeroBot"""
+        await ctx.send(command_list)
         print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} displayed the command list')
 
 async def main():
