@@ -86,19 +86,21 @@ class MusicBot(commands.Cog):
         self.track_queue = []
         self.last_now_playing_msg_id = None
         self.active_track = None
+        self.paused = False
+        self.looping = False
 
     async def player_loop(self, ctx):
         # Constantly check for items in the track queue
         while True:
-            if self.track_queue and ctx.voice_client and not ctx.voice_client.is_playing():
+            if self.track_queue and ctx.voice_client and not ctx.voice_client.is_playing() and len(self.track_queue) > 0 and not self.paused:
                 # Remove the FIFO item and store it as a local variable
                 url, title = self.track_queue.pop(0)
-                self.active_track = title
+                self.active_track = title, url
 
                 # Generate a ffmpeg source from the url and play it in the voice channel
                 source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
                 ctx.voice_client.play(source, after=lambda _: asyncio.run_coroutine_threadsafe(self.player_loop(ctx), self.client.loop))
-                print(f"{systemColor}[System] - [{time.ctime()}] - Now playing: {self.active_track}")
+                print(f"{systemColor}[System] - [{time.ctime()}] - Now playing: {self.active_track[0]}")
 
                 await self.update_previous_now_playing_message(ctx, title)
             await asyncio.sleep(1)
@@ -118,6 +120,7 @@ class MusicBot(commands.Cog):
 
     @commands.command()
     async def connect(self, ctx):
+        self.paused = False
         voice_channel = ctx.author.voice.channel if ctx.author.voice else None
         try:
             if not voice_channel:  # User summoned the bot but wasn't in a channel
@@ -198,9 +201,40 @@ class MusicBot(commands.Cog):
     @commands.command()
     async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
-            await ctx.send(f"## **Current track ({self.active_track}) has been skipped **⏩")
+            await ctx.send(f"## **Current track ({self.active_track[0]}) has been skipped **⏩")
             ctx.voice_client.stop()
-            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} skipped {self.active_track}')
+            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} skipped {self.active_track[0]}')
+
+    @commands.command()
+    async def pause(self, ctx):
+        if not self.paused:
+            self.paused = True
+            self.track_queue.insert(0, (self.active_track[1], self.active_track[0]))
+            ctx.voice_client.stop()
+            self.active_track = None
+            await ctx.send(f"## **Queue Paused** 🎵")
+            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} paused the queue')
+        else:
+            await ctx.send(f"## **Queue is already paused** 🎵")
+
+    @commands.command()
+    async def resume(self, ctx):
+        if self.paused:
+            self.paused = False
+            await ctx.send(f"## **Queue Resumed** 🎵")
+            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} resumed the queue')
+        else:
+            await ctx.send(f"## **Queue already playing** 🎵")
+
+    @commands.command()
+    async def loop(self, ctx):
+        # TODO
+        return
+
+    @commands.command()
+    async def unloop(self, ctx):
+        # TODO
+        return
 
     @commands.command()
     async def queue(self, ctx):
@@ -209,7 +243,7 @@ class MusicBot(commands.Cog):
             await ctx.send("## **NeroBot's queue is currently empty **🪹")
             print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue but it was empty')
         else:
-            queueString = f"## **Currently Playing** 🎵\n> {self.active_track} **\n\n## **Up Next** ↩️\n"
+            queueString = f"## **Currently Playing** 🎵\n> {self.active_track[0]} **\n\n## **Up Next** ↩️\n"
             if self.track_queue:
                 queueString += "\n".join([f"{index + 1}. {title}" for index, (_, title) in enumerate(self.track_queue)])
             await ctx.send(queueString)
@@ -245,10 +279,30 @@ class MusicBot(commands.Cog):
         print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} displayed the secret')
 
     @commands.command()
-    async def instructions(self, ctx):
-        command_list = """## __**NeroBot Commands**__ 📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!instructions** -  display all relevant commands\n- **!goodbot** - thank the bot for its service\n- **!about** - about NeroBot"""
+    async def support(self, ctx):
+        command_list = """## __**NeroBot Commands**__ 📋\n- **!play <title>** - play a track from youtube\n- **!skip** - skip the current track\n -**!pause** - pause the queue \n- **!resume** - resume the queue \n- **!queue** - view the current track queue \n- **!clear** - clears the queue of all tracks\n- **!leave** - disconnects NeroBot\n- **!support** -  display all relevant commands\n- **!goodbot** - thank the bot for its service\n- **!about** - about NeroBot"""
         await ctx.send(command_list)
         print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} displayed the command list')
+
+    @commands.command()
+    async def update(self, ctx):
+        message = ("""#  **:loudspeaker: NeroBot Update - (v1.1) :loudspeaker:**
+        ## Hello! I've been updated to support more functionality!  
+        
+        ### :rocket: What's New:  
+        :small_blue_diamond: `!pause` - Pause the queue  
+        :small_blue_diamond: `!resume` - Resume listening to the queue
+        :small_blue_diamond: :tools: Bug fixes and improvements
+        
+        ### Enjoy the update! :musical_note::robot:""")
+
+        for channel in ctx.guild.text_channels:
+            if ctx.author.guild_permissions.administrator:
+                if channel.permissions_for(ctx.guild.me).send_messages:
+                    await channel.send(message)
+            else:
+                await channel.send("You do not have permission to do that.")
+            break
 
 async def main():
     async def setup_hook():
