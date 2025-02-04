@@ -1,21 +1,12 @@
 import asyncio
-import os
 import random
 import time
-
 import discord
 import yt_dlp
+from playlist_generator import generate
 
 from colorama import Fore, init
 from discord.ext import commands
-from dotenv import load_dotenv
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.voice_states = True
-
-load_dotenv()
-api_token = os.getenv("DISCORD_TOKEN")
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
@@ -39,46 +30,6 @@ userInputColor = Fore.LIGHTGREEN_EX
 statusColor = Fore.CYAN
 userColor = Fore.LIGHTMAGENTA_EX
 addedToQueue = Fore.LIGHTYELLOW_EX
-
-client = commands.Bot(command_prefix="!", intents=intents)
-
-@client.event
-async def on_ready():
-    print(f'Logged in as {statusColor}{client.user} (ID:{client.user.id})')
-    print('--------------------------------------------------')
-    asyncio.create_task(auto_disconnect())  # Create task for auto disconnect
-    asyncio.create_task(update_presence())  # Create task for updating presence
-
-async def update_presence():
-    music_activities = [
-        "lofi beats", "jazz classics", "chill vibes", "indie tracks",
-        "relaxing tunes", "soulful sounds", "instrumental tracks",
-        "classical symphonies", "acoustic jams", "electronic beats",
-        "the latest releases", "90's hits", "reggae vibes",
-        "some vinyls", "smooth jazz", "dance hits", "garage tunes",
-        "happy tunes", "ambient sounds", "funk grooves", "some mix-tapes",
-        "leighton scream", "tiktok mic-spam", "girl-pop",
-    ]
-    while True:
-        activity = random.choice(music_activities)
-        await client.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.listening, name=activity)
-        )
-        await asyncio.sleep(60 * 30)  # Update presence every 30 minutes
-
-async def auto_disconnect():
-    await client.wait_until_ready()
-    while True:
-        for vc in client.voice_clients:
-            if not vc.is_playing():
-                print(f'{systemColor}[System] - [{time.ctime()}] - Starting auto disconnect sequence')
-                await asyncio.sleep(600)
-                if not vc.is_playing():
-                    print(f'{systemColor}[System] - [{time.ctime()}] - Bot has been auto disconnected')
-                    await vc.disconnect()
-                else:
-                    print(f'{systemColor}[System] - [{time.ctime()}] - Cancelled auto disconnect sequence')
-        await asyncio.sleep(60)
 
 class MusicBot(commands.Cog):
     def __init__(self, client):
@@ -199,6 +150,27 @@ class MusicBot(commands.Cog):
             await self.player_loop(ctx)
 
     @commands.command()
+    async def genplaylist(self, ctx, description: str, count: int):
+        print('Okay')
+        await ctx.send("Generating AI Playlist...")
+        print('Okay2')
+        song_list = await asyncio.to_thread(generate, description, count)
+        print('Okay3')
+        for song in song_list:
+            try:
+                print('Okay4')
+                info = ydl.extract_info(f"ytsearch:{song}", download=False)
+                if 'entries' in info:
+                    info = info['entries'][0]
+                url = info['url']
+                title = info['title']
+                self.track_queue.append((url, title))
+            except Exception as e:
+                # Handle any errors that might occur when fetching song data
+                await ctx.send(f"Failed to add {song}: {str(e)}")
+
+
+    @commands.command()
     async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             await ctx.send(f"## **Current track ({self.active_track[0]}) has been skipped **⏩")
@@ -239,7 +211,7 @@ class MusicBot(commands.Cog):
     @commands.command()
     async def queue(self, ctx):
         # If the queue is empty and there is no active track
-        if not self.active_track and not self.track_queue:
+        if (not self.active_track and not self.track_queue) or not self.paused:
             await ctx.send("## **NeroBot's queue is currently empty **🪹")
             print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue but it was empty')
         else:
@@ -304,10 +276,5 @@ class MusicBot(commands.Cog):
                 await channel.send("You do not have permission to do that.")
             break
 
-async def main():
-    async def setup_hook():
-        await client.add_cog(MusicBot(client))
-    client.setup_hook = setup_hook
-    await client.start(api_token)
-
-asyncio.run(main())
+    def is_paused(self):
+        return self.paused
