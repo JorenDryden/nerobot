@@ -3,8 +3,8 @@ import random
 import time
 import discord
 import yt_dlp
-from playlist_generator import generate
 
+from playlist_generator import generate_songs
 from colorama import Fore, init
 from discord.ext import commands
 
@@ -43,7 +43,7 @@ class MusicBot(commands.Cog):
     async def player_loop(self, ctx):
         # Constantly check for items in the track queue
         while True:
-            if self.track_queue and ctx.voice_client and not ctx.voice_client.is_playing() and len(self.track_queue) > 0 and not self.paused:
+            if self.track_queue and ctx.voice_client and not ctx.voice_client.is_playing() and not self.paused:
                 # Remove the FIFO item and store it as a local variable
                 url, title = self.track_queue.pop(0)
                 self.active_track = title, url
@@ -54,6 +54,10 @@ class MusicBot(commands.Cog):
                 print(f"{systemColor}[System] - [{time.ctime()}] - Now playing: {self.active_track[0]}")
 
                 await self.update_previous_now_playing_message(ctx, title)
+
+            if not self.track_queue and not ctx.voice_client.is_playing():
+                self.active_track = None
+
             await asyncio.sleep(1)
 
     async def update_previous_now_playing_message(self, ctx, title):
@@ -68,6 +72,19 @@ class MusicBot(commands.Cog):
         # Set the class attribute as the new one and send an updated "now-playing" message
         new_msg = await ctx.send(f'## **Now Playing **🎵 \n > **{title}**')
         self.last_now_playing_msg_id = new_msg.id
+
+    async def find_song_and_add_to_queue(self, ctx, description, generated):
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(f"ytsearch:{description}", download=False)
+            if 'entries' in info:
+                info = info['entries'][0]
+            url = info['url']
+            title = info['title']
+            self.track_queue.append((url, title))
+            print(
+                f"{userInputColor}[User] - [{time.ctime()}] - {addedToQueue}{ctx.author.display_name} added {title} to queue")
+        if ctx.voice_client.is_playing() and not generated:
+            await ctx.send(f'## **Added to Queue **✅ \n> **{title}**')
 
     @commands.command()
     async def connect(self, ctx):
@@ -96,18 +113,9 @@ class MusicBot(commands.Cog):
         await self.connect(ctx)  # Ensure the bot connects to the user's voice channel
 
         async with ctx.typing():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = ydl.extract_info(f"ytsearch:{search}", download=False)
-                if 'entries' in info:
-                    info = info['entries'][0]
-                url = info['url']
-                title = info['title']
-                self.track_queue.append((url, title))
-                print(f"{userInputColor}[User] - [{time.ctime()}] - {addedToQueue}{ctx.author.display_name} added {title} to queue")
+            await self.find_song_and_add_to_queue(ctx, search, False)
 
-        if ctx.voice_client.is_playing():
-            await ctx.send(f'## **Added to Queue **✅ \n> **{title}**')
-        else:
+        if not ctx.voice_client.is_playing():
             await self.player_loop(ctx)
 
     @commands.command()
@@ -150,32 +158,37 @@ class MusicBot(commands.Cog):
             await self.player_loop(ctx)
 
     @commands.command()
-    async def genplaylist(self, ctx, description: str, count: int):
-        print('Okay')
-        await ctx.send("Generating AI Playlist...")
-        print('Okay2')
-        song_list = await asyncio.to_thread(generate, description, count)
-        print('Okay3')
-        for song in song_list:
-            try:
-                print('Okay4')
-                info = ydl.extract_info(f"ytsearch:{song}", download=False)
-                if 'entries' in info:
-                    info = info['entries'][0]
-                url = info['url']
-                title = info['title']
-                self.track_queue.append((url, title))
-            except Exception as e:
-                # Handle any errors that might occur when fetching song data
-                await ctx.send(f"Failed to add {song}: {str(e)}")
+    async def generate(self, ctx, description: str = "random", count: int = 5):
+        # limit maximum songs to 20
+        if count >= 20:
+            await ctx.send("## Number of songs requested must be less than 20. ")
+            return
 
+        # connect the bot and initialize the queue string
+        await self.connect(ctx)
+        queue_string = "## Generated the following songs and added it to queue ✅:\n"
+
+        # generate the song list and find and add each song to the queue as well as the queue list string
+        async with ctx.typing():
+            song_list = generate_songs(description, count)
+            for song in song_list:
+                queue_string += f"- {song}\n"
+                await self.find_song_and_add_to_queue(ctx, song, True)
+
+        # send the queue string
+        await ctx.send(queue_string)
+
+        # start the player loop if not playing
+        if not ctx.voice_client.is_playing():
+            await self.player_loop(ctx)
 
     @commands.command()
     async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             await ctx.send(f"## **Current track ({self.active_track[0]}) has been skipped **⏩")
+            self.active_track = None
             ctx.voice_client.stop()
-            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} skipped {self.active_track[0]}')
+            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} skipped {self.active_track}')
 
     @commands.command()
     async def pause(self, ctx):
@@ -211,15 +224,19 @@ class MusicBot(commands.Cog):
     @commands.command()
     async def queue(self, ctx):
         # If the queue is empty and there is no active track
-        if (not self.active_track and not self.track_queue) or not self.paused:
-            await ctx.send("## **NeroBot's queue is currently empty **🪹")
-            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue but it was empty')
-        else:
-            queueString = f"## **Currently Playing** 🎵\n> {self.active_track[0]} **\n\n## **Up Next** ↩️\n"
+        if self.active_track or self.track_queue:
+            queueString = f"## **Currently Playing** 🎵\n> {self.active_track[0]} \n## **Up Next** ↩️\n"
             if self.track_queue:
                 queueString += "\n".join([f"{index + 1}. {title}" for index, (_, title) in enumerate(self.track_queue)])
+            else:
+                queueString += "No upcoming tracks."
             await ctx.send(queueString)
-            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue')
+            print(
+                f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue')
+        else:
+            await ctx.send("## **NeroBot's queue is currently empty**🪹")
+            print(
+                f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} requested the track queue but it was empty')
 
     @commands.command()
     async def leave(self, ctx):
@@ -241,7 +258,7 @@ class MusicBot(commands.Cog):
 
     @commands.command()
     async def about(self, ctx):
-        await ctx.send("# About NeroBot :robot:\n- NeroBot is a youtube-based discord music bot written in Python. \n - It uses the following libraries: yt_dlp, discord.py, dotenv, and other internal libraries.\n- NeroBot runs on a Raspberry Pi 3.0 B+ single core machine (WIP).\n- You can access the git repository and view the development timeline [here](https://github.com/JorenDryden/nerobot).")
+        await ctx.send("# About NeroBot :robot:\n- NeroBot is a youtube-based discord music bot written in Python. \n - It uses the following libraries: yt_dlp, discord.py, dotenv, openai, ffmpeg, and other internal libraries.\n- You can access the git repository and view the development timeline [here](https://github.com/JorenDryden/nerobot). \n© 2025 Joren Dryden. All Rights Reserved.")
         print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} displayed about me')
 
     @commands.command()
@@ -278,3 +295,6 @@ class MusicBot(commands.Cog):
 
     def is_paused(self):
         return self.paused
+
+    def is_playing(self):
+        return bool(self.track_queue or self.active_track)
