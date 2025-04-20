@@ -39,26 +39,35 @@ class MusicBot(commands.Cog):
         self.active_track = None
         self.paused = False
         self.looping = False
+        self.looped_song = None
 
     async def player_loop(self, ctx):
         # Constantly check for items in the track queue
         while True:
             if self.track_queue and ctx.voice_client and not ctx.voice_client.is_playing() and not self.paused:
-                # Remove the FIFO item and store it as a local variable
-                url, title = self.track_queue.pop(0)
-                self.active_track = title, url
+                if self.looping:
+                    title, url = self.active_track
 
-                # Generate a ffmpeg source from the url and play it in the voice channel
-                source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
-                ctx.voice_client.play(source, after=lambda _: asyncio.run_coroutine_threadsafe(self.player_loop(ctx), self.client.loop))
-                print(f"{systemColor}[System] - [{time.ctime()}] - Now playing: {self.active_track[0]}")
+                    self.play_through_voice_client(ctx, url)
+                else:
+                    # Remove the FIFO item and store it as a local variable
+                    url, title = self.track_queue.pop(0)
+                    self.active_track = title, url
 
-                await self.update_previous_now_playing_message(ctx, title)
+                    self.play_through_voice_client(ctx, url)
+
+                    await self.update_previous_now_playing_message(ctx, title)
 
             if not self.track_queue and not ctx.voice_client.is_playing():
                 self.active_track = None
 
             await asyncio.sleep(1)
+
+    def play_through_voice_client(self, ctx, url):
+        # Generate a ffmpeg source from the url and play it in the voice channel
+        source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
+        ctx.voice_client.play(source,after=lambda _: asyncio.run_coroutine_threadsafe(self.player_loop(ctx), self.client.loop))
+        print(f"{systemColor}[System] - [{time.ctime()}] - Now playing: {self.active_track[0]}")
 
     async def update_previous_now_playing_message(self, ctx, title):
         # If there is a previous "now playing" message
@@ -117,6 +126,10 @@ class MusicBot(commands.Cog):
 
         if not ctx.voice_client.is_playing():
             await self.player_loop(ctx)
+
+    @commands.command()
+    async def p(self, ctx, *, search):
+        await self.play(ctx, search=search)
 
     @commands.command()
     async def playlist(self, ctx, *, search):
@@ -191,6 +204,10 @@ class MusicBot(commands.Cog):
             print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} skipped {self.active_track}')
 
     @commands.command()
+    async def s(self, ctx):
+        await self.skip(ctx)
+
+    @commands.command()
     async def pause(self, ctx):
         if not self.paused:
             self.paused = True
@@ -213,12 +230,43 @@ class MusicBot(commands.Cog):
 
     @commands.command()
     async def loop(self, ctx):
-        # TODO
+        if not self.is_playing():
+            await ctx.send(f"There is no active song to loop")
+        elif self.looping:
+            await ctx.send(f"Already looping!")
+        else:
+            self.looped_song = self.active_track[0]
+            self.looping = True
+            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} looped the current song {self.looped_song}')
+            await ctx.send(f"## Looping {self.active_track[0]} until !unloop")
+        return
+
+    @commands.command()
+    async def diagnostics(self, ctx):
+        await ctx.send(f""" ## NeroBot Instance Diagnostics
+        ### Time : {time.ctime()} 
+        self.client = {self.client}
+        self.track_queue = {self.track_queue}
+        self.last_now_playing_msg_id = {self.last_now_playing_msg_id}
+        self.active_track = {self.active_track}
+        self.paused = {self.paused}
+        self.looping = {self.looping}
+        self.looped_song = {self.looped_song}
+        """)
         return
 
     @commands.command()
     async def unloop(self, ctx):
-        # TODO
+        if not self.is_playing():
+            await ctx.send(f"There is no active song to unloop")
+        elif not self.looping:
+            await ctx.send(f"Already not looping current track!")
+        else:
+            print(f'{userInputColor}[User] - [{time.ctime()}] - {userColor}{ctx.author.display_name} unlooped the current song')
+            self.looped_song = None
+            self.looping = False
+            self.track_queue.pop(0)
+            await ctx.send(f"## Unlooping!")
         return
 
     @commands.command()
